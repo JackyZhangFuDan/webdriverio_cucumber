@@ -1,3 +1,26 @@
+const fs = require('fs');
+//const argv = require("yargs").argv;
+const { removeSync } = require('fs-extra');
+
+const reporter = require('cucumber-html-reporter');
+const currentTime = new Date().toJSON().replace(/:/g, "-");
+const jsonTmpDirectory = '.tmp/new/';
+
+let calmApps = [
+    { //for app1
+        featureFiles:['test\\features\\feature1.feature','test\\features\\feature2.feature'],
+        supaConfFile:'supa.configuration.file.1',
+        ipaProject:'',
+        ipaScenario:''
+    },
+    { //for app2
+        featureFiles:['test\\features\\feature3.feature'],
+        supaConfFile:'supa.configuration.file.2',
+        ipaProject:'',
+        ipaScenario:''
+    }
+]
+
 exports.config = {
     //execArgv: ['--inspect-brk=127.0.0.1:58598'],
     //
@@ -18,8 +41,14 @@ exports.config = {
     // directory is where your package.json resides, so `wdio` will be called from there.
     //
     specs: [
-        './test/features/**/*.feature'
+        'test\\features\\feature1.feature',
+        //'test\\features\\feature1.feature',
+        'test\\features\\feature2.feature',
+
+        'test\\features\\feature3.feature',
+        //'test\\features\\feature3.feature'
     ],
+
     // Patterns to exclude.
     exclude: [
         // 'path/to/excluded/files'
@@ -107,7 +136,7 @@ exports.config = {
     // Services take over a specific job you don't want to take care of. They enhance
     // your test setup with almost no effort. Unlike plugins, they don't add new
     // commands. Instead, they hook themselves up into the test process.
-    services: ['chromedriver'],
+    services: ['chromedriver','shared-store'],
     
     // Framework you want to run your specs with.
     // The following are supported: Mocha, Jasmine, and Cucumber
@@ -126,7 +155,14 @@ exports.config = {
     // Test reporter for stdout.
     // The only one supported by default is 'dot'
     // see also: https://webdriver.io/docs/dot-reporter.html
-    reporters: ['spec'],
+    reporters: [
+        'spec',
+        [ 'cucumberjs-json', {
+                jsonFolder: jsonTmpDirectory,
+                language: 'en',
+            },
+        ],
+    ],
 
     cucumberOpts: {
         require: ['./test/scripts/stepsgroup1.js'],      // <string[]> (file/dir) require files before executing features
@@ -156,8 +192,12 @@ exports.config = {
      * @param {Object} config wdio configuration object
      * @param {Array.<Object>} capabilities list of capabilities details
      */
-    // onPrepare: function (config, capabilities) {
-    // },
+     onPrepare: function (config, capabilities) {
+        removeSync(jsonTmpDirectory);
+        if (!fs.existsSync(jsonTmpDirectory)){
+            fs.mkdirSync(jsonTmpDirectory);
+        }
+     },
     /**
      * Gets executed before a worker process is spawned and can be used to initialise specific service
      * for that worker as well as modify runtime environments in an async fashion.
@@ -210,6 +250,67 @@ exports.config = {
      */
     // beforeHook: function (test, context) {
     // },
+
+    beforeFeature: function (uri, feature, scenarios) {
+        
+        //check how many times the feature file has been ran
+        let cnt = browser.sharedStore.get(uri);
+        if (cnt == undefined){
+            cnt = 1;
+        }else{
+            cnt = cnt + 1;
+        }
+        console.log("feature uri: "+uri + "; times: " + cnt);
+        browser.sharedStore.set(uri, cnt);
+
+        //if this is the first time of running this feature file, we initiate something
+        if (cnt == 1){
+            let currentAppIdx = -1; 
+            for (let i = 0 ; i < calmApps.length; i++){
+                let app = calmApps[i];
+                if(app.featureFiles.indexOf(uri) >= 0){
+                    currentAppIdx = i;
+                    break;
+                }
+            }
+            if (currentAppIdx >= 0){
+                //#1 clean the supa config;
+                let lastAppIdx = browser.sharedStore.get('last_calmapp_idx');
+                if (lastAppIdx != undefined){
+                    console.log("clean supa config from app "+lastAppIdx);
+                }
+
+                //#2 initial the supa for this app
+                browser.sharedStore.set('last_calmapp_idx', currentAppIdx);
+                console.log("initial supa for app "+currentAppIdx+": " + calmApps[currentAppIdx].supaConfFile);
+            }
+        }
+
+        /*var featureExistInCounter = false;
+        var featureCounterString=fs.readFileSync('./hello.json').toString();
+        var featureCounter = JSON.parse(featureCounterString);
+        for(var i = 0; i < featureCounter.length; i++){
+            if( featureCounter[i].featureName === feature.uri){
+                featureExistInCounter = true;
+                featureCounter[i].count = featureCounter[i].count + 1;
+            }
+        }
+        if(!featureExistInCounter){
+            featureCounter.push({featureName:feature.uri, count:1});
+            if(checkIfTheFirstFeatureExecution(feature.uri)){
+                performance.resetSupaConfig(getSupaConfigFileNameByFeatureName(feature.uri));
+            }
+        }
+        performance.resetDataProvider();
+        
+        fs.writeFileSync('./hello.json', JSON.stringify(featureCounter));
+        */
+    },
+
+    /*
+    beforeStep: function({ uri, feature, step }, context){
+    }*/
+
     /**
      * Hook that gets executed _after_ a hook within the suite starts (e.g. runs after calling
      * afterEach in Mocha)
@@ -263,8 +364,24 @@ exports.config = {
      * @param {Array.<Object>} capabilities list of capabilities details
      * @param {<Object>} results object containing test results
      */
-    // onComplete: function(exitCode, config, capabilities, results) {
-    // },
+     onComplete: function(exitCode, config, capabilities, results) {
+        try{
+            
+            var options = {
+                theme: 'bootstrap',
+                jsonDir: jsonTmpDirectory,
+                output: `${jsonTmpDirectory}report-${currentTime}.html`,
+                reportSuiteAsScenarios: true,
+                scenarioTimestamp: true,
+                launchReport: true,
+                ignoreBadJsonFile: true
+            };
+    
+            reporter.generate(options);
+        } catch(err){
+            console.log('err', err);
+        }
+     },
     /**
     * Gets executed when a refresh happens.
     * @param {String} oldSessionId session ID of the old session
